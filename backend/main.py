@@ -12,5 +12,5 @@ def health_check():
     return {
         "status": "online",
         "tesseract_version": str(pytesseract.get_tesseract_version()),
-        "binary_path": tesseract_path
+        "binary_path" : tesseract_path
     }
