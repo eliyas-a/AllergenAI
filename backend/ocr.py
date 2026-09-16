@@ -1,26 +1,58 @@
+from dataclasses import dataclass, field
+import shutil
+from typing import, List, Optional, Tuple
+
 import cv2
 import pytesseract
-import shutil
 import numpy as np
 
-#locate system executable path automatically
+#configure Tesseract binary path
 tesseract_path = shutil.which("tesseract") or "/usr/bin/tesseract"
-
-#assign binary path to pytesseract
 pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
+#Threshold Constants
+MEAN_CONF_THRESHOLD = 60.0
+WORD_CONF_THRESHOLD = 50.0
+
+# ---Data Structures---
+@dataclass
+class Token:
+    word: str
+    confidence: float
+    is_low_conf: bool
+
+@dataclass
+class PreprocessResult:
+    success: bool
+    image: Optional[np.ndarray] = None
+    reason: Optional[str] = None
+
+@dataclass
+
+# ---Preprocessing Pipeline--- #
 def convert_to_greyscale(image: np.ndarray): ## converts BGR image array to a 1-channel greyscale
-    ## use cv2.cvtColor
-    pass
+    """"Converts a BGR image array into greyscale"""
+    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-def remove_noise(gray_image: np.ndarray): ## applies slight Gausssian blur to smooth camera grain
-    ## use cv2.GaussianBlur
-    pass
+def remove_noise(grey_image: np.ndarray): 
+    """Applies Gaussian blur to smooth camera grain"""
+    return cv2.GaussianBlur(grey_image, (3,3), 0)
 
-def apply_threshold(blurred_image: np.ndarray): ## applies binarization to maximise text contrast
-    ## use cv2.threshold with cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    pass
 
+def apply_threshold(blurred_image: np.ndarray):
+    """Applies Otsu's binarisation to maximise text contrast"""
+    # returns only thresholded image matrix
+    _, thresh = cv2.threshold(
+        blurred_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    return thresh
+
+
+######GOT UP TO HERE####
+#######
+#######
+#####
+    
 def extract_text_from_bytes(binary_image: bytes):
     # convert raw bytes to a NumPy array
     np_array = np.frombuffer(image_bytes, np.uint8) 
@@ -31,8 +63,8 @@ def extract_text_from_bytes(binary_image: bytes):
         raise ValueError("Could not decode image ")
 
     # pass through preprocessing pipeline
-    gray = convert_to_greyscale(image)
-    blurred = remove_noise(gray)
+    grey = convert_to_greyscale(image)
+    blurred = remove_noise(grey)
     thresh = apply_threshold(blurred)
 
     # configure Tesseract parameter
