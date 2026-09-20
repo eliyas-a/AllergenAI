@@ -1,89 +1,85 @@
 from dataclasses import dataclass, field
 import shutil
-from typing import, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-import cv2
-import pytesseract
 import numpy as np
+import pytesseract
 
-#configure Tesseract binary path
+# Import directly from your dedicated module
+from preprocessing import preprocess_image
+
 tesseract_path = shutil.which("tesseract") or "/usr/bin/tesseract"
 pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-#Threshold Constants
 MEAN_CONF_THRESHOLD = 60.0
 WORD_CONF_THRESHOLD = 50.0
 
-# ---Data Structures---
+
 @dataclass
 class Token:
     word: str
     confidence: float
     is_low_conf: bool
 
+
 @dataclass
-class PreprocessResult:
+class ScanResult:
     success: bool
-    image: Optional[np.ndarray] = None
+    raw_text: str = ""
     reason: Optional[str] = None
-
-@dataclass
-
-# ---Preprocessing Pipeline--- #
-def convert_to_greyscale(image: np.ndarray): ## converts BGR image array to a 1-channel greyscale
-    """"Converts a BGR image array into greyscale"""
-    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-def remove_noise(grey_image: np.ndarray): 
-    """Applies Gaussian blur to smooth camera grain"""
-    return cv2.GaussianBlur(grey_image, (3,3), 0)
+    tokens: List[Token] = field(default_factory=list)
+    has_low_conf: bool = False
 
 
-def apply_threshold(blurred_image: np.ndarray):
-    """Applies Otsu's binarisation to maximise text contrast"""
-    # returns only thresholded image matrix
-    _, thresh = cv2.threshold(
-        blurred_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
-    return thresh
-
-
-######GOT UP TO HERE####
-#######
-#######
-#####
-    
-def extract_text_from_bytes(binary_image: bytes):
-    # convert raw bytes to a NumPy array
-    np_array = np.frombuffer(image_bytes, np.uint8) 
-
-    #decode array into openCV image matrix
-    image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
-    if image is None:
-        raise ValueError("Could not decode image ")
-
-    # pass through preprocessing pipeline
-    grey = convert_to_greyscale(image)
-    blurred = remove_noise(grey)
-    thresh = apply_threshold(blurred)
-
-    # configure Tesseract parameter
+def extract_words_with_confidence(
+    processed_image: np.ndarray,
+) -> List[Tuple[str, float]]:
     custom_config = r"--psm 6"
+    data = pytesseract.image_to_data(
+        processed_image, config=custom_config, output_type=pytesseract.Output.DICT
+    )
 
-    # execute OCR
-    extracted_text = pytesseract.image_to_string(thresh, config=custom_config)
+    extracted_pairs = []
+    for i in range(len(data["text"])):
+        word = data["text"][i].strip()
+        conf = float(data["conf"][i])
+        if word and conf != -1:
+            extracted_pairs.append((word, conf))
 
-    return extracted_text.strip()
+    return extracted_pairs
 
-if __name__ == "__main__":
-    test_image_path = "... .jpg"
 
-    try:
-        with open(test_image_path, "rb") as image_file:
-            file_bytes = image_file.read()
-            text = extract_text_from_bytes(file_bytes)
-            print("--- Extracted Text ---")
-            print(text)
+def run_ocr(image_bytes: bytes) -> ScanResult:
+    # Delegate vision pipeline to preprocessing module
+    prep = preprocess_image(image_bytes)
+    if not prep.success or prep.image is None:
+        return ScanResult(success=False, reason=prep.reason)
 
-    except FileNotFoundError:
-        print(f"Test image not found at '{test_image_path}'. Add an image to test.")
+    word_conf_pairs = extract_words_with_confidence(prep.image)
+    if not word_conf_pairs:
+        return ScanResult(success=False, reason="NO_TEXT_DETECTED")
+
+    confidences = [score for _, score in word_conf_pairs]
+    mean_confidence = float(np.mean(confidences))
+
+    if mean_confidence < MEAN_CONF_THRESHOLD:
+        return ScanResult(
+            success=False,
+            reason=f"LOW_CONFIDENCE (Mean: {mean_confidence:.1f}%)",
+        )
+
+    tokens = [
+        Token(
+            word=word,
+            confidence=score,
+            is_low_conf=(score < WORD_CONF_THRESHOLD),
+        )
+        for word, score in word_conf_pairs
+    ]
+
+    raw_text = " ".join([t.word for t in tokens])
+    has_low_conf = any(t.is_low_conf for t in tokens)
+
+    return ScanResult(
+        success=True, raw_text=raw_text, tokens=tokens, has_low_conf=has_low_conf
+    )
