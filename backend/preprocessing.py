@@ -33,7 +33,7 @@ def remove_noise(grey_image: np.ndarray) -> np.ndarray:
 
 
 def apply_threshold(blurred_image: np.ndarray) -> np.ndarray:
-    """Applies Otsu's binarisation to maximize text contrast."""
+    """Applies adaptive Gaussian thresholding to binarise the image, coping with uneven lighting across the label"""
     thresh = cv2.adaptiveThreshold(
         blurred_image,
         255,
@@ -61,7 +61,15 @@ def preprocess_image(image_bytes: bytes) -> PreprocessResult:
         blurred = remove_noise(contrasted)
         thresh = apply_threshold(blurred)
 
-        return PreprocessResult(success=True, image=thresh)
+        if not image_bytes:
+            return PreprocessResult(
+                success=False, reason="EMPTY_INPUT"
+            )
+        
+        else:
+            return PreprocessResult(
+                success=True, image=thresh
+                )
 
     except cv2.error as e:
         # Fixed: Return None for image on error instead of unassigned 'thresh'
@@ -70,14 +78,23 @@ def preprocess_image(image_bytes: bytes) -> PreprocessResult:
         )
 
 
+def save_processed_image(processed_image: np.ndarray, output_path: str) -> bool:
+    """Saves the processed image to a separate output file."""
+    return cv2.imwrite(output_path, processed_image)
+
+
 if __name__ == "__main__":
     # Test script for preprocessing module
-    test_path = "sample_label.jpg"
+    test_path = "images.jfif"
+    output_path = "processed_output.png"
     try:
         with open(test_path, "rb") as f:
             result = preprocess_image(f.read())
             print(f"Preprocessing Success: {result.success}")
             if result.success and result.image is not None:
+                saved = save_processed_image(result.image, output_path)
+                print(f"Processed Image Saved: {saved}")
+                print(f"Output File: {output_path}")
                 print(f"Processed Image Shape: {result.image.shape}")
             else:
                 print(f"Reason: {result.reason}")
