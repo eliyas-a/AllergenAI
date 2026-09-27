@@ -5,9 +5,10 @@ import numpy as np
 
 ### CONSTANTS ###
 CLAHE_CLIP_LIMIT = 2.0
-CLAHE_TILE_GRID = (2, 2)
-ADAPTIVE_BLOCK_SIZE = 31
-ADAPTIVE_C = 10
+CLAHE_TILE_GRID = (8, 8)
+ADAPTIVE_BLOCK_SIZE = 15  
+ADAPTIVE_C = 12
+UPSCALE_FACTOR = 1.5
 
 @dataclass
 class PreprocessResult:
@@ -19,6 +20,20 @@ def convert_to_greyscale(image: np.ndarray) -> np.ndarray:
     """Converts a BGR image array into a 1-channel greyscale image."""
     return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
+def upscale_image(grey_image: np.ndarray, factor: float = UPSCALE_FACTOR) -> np.ndarray:
+    """Resizes image to increase DPI, helping separate dense text strokes."""
+    height, width = grey_image.shape[:2]
+    new_dim = (int(width * factor), int(height * factor))
+    return cv2.resize(
+        grey_image, new_dim, interpolation=cv2.INTER_CUBIC
+        )
+
+def normalize_contrast(grey_image: np.ndarray) -> np.ndarray:
+    """Stretches pixel intensities across the full 0-255 spectrum to fix dim lighting."""
+    return cv2.normalize(
+        grey_image, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX
+        )
+
 def enhance_contrast(grey_image: np.ndarray) -> np.ndarray:
     """Applies CLAHE to equalise contrast."""
     clahe = cv2.createCLAHE(
@@ -29,6 +44,13 @@ def enhance_contrast(grey_image: np.ndarray) -> np.ndarray:
 def remove_noise(grey_image: np.ndarray) -> np.ndarray:
     """Applies Gaussian blur to smooth camera grain."""
     return cv2.GaussianBlur(grey_image, (3, 3), 0)
+
+def sharpen_image(grey_image: np.ndarray) -> np.ndarray:
+    """Applies a sharpening matrix to accentuate text edges before binarisation."""
+    kernel = np.array([[0, -1, 0],
+                       [-1, 5, -1],
+                       [0, -1, 0]])
+    return cv2.filter2D(grey_image, -1, kernel)
 
 def apply_threshold(blurred_image: np.ndarray) -> np.ndarray:
     """Applies adaptive Gaussian thresholding to binarise the image."""
@@ -43,8 +65,6 @@ def apply_threshold(blurred_image: np.ndarray) -> np.ndarray:
     return thresh
 
 def preprocess_image(image_bytes: bytes) -> PreprocessResult:
-    """Decodes raw bytes and passes them through the OpenCV vision pipeline."""
-
     if not image_bytes:
         return PreprocessResult(success=False, reason="EMPTY_INPUT")
 
@@ -53,21 +73,30 @@ def preprocess_image(image_bytes: bytes) -> PreprocessResult:
         image = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
 
         if image is None:
-            return PreprocessResult(
-                success=False, reason="INVALID_IMAGE_DECODE"
-                )
-        
+            return PreprocessResult(success=False, reason="INVALID_IMAGE_DECODE")
+
+        # 1. Convert to grayscale
         grey = convert_to_greyscale(image)
-        contrasted = enhance_contrast(grey)
-        blurred = remove_noise(contrasted)
-        thresh = apply_threshold(blurred)
+        
+        # 2. Upscale image to improve text resolution (DPI)
+        upscaled = upscale_image(grey)
+
+        sharp = sharpen_image(upscaled)
+
+        # 3. Light noise reduction BEFORE contrast boost
+        blurred = remove_noise(sharp)
+
+        # 4. Stretch lighting range & apply CLAHE
+        norm = normalize_contrast(blurred)
+        contrasted = enhance_contrast(norm)
+
+        # 5. Fine-tuned adaptive binarisation with higher C
+        thresh = apply_threshold(contrasted)
 
         return PreprocessResult(success=True, image=thresh)
-    
+
     except Exception as e:
-        return PreprocessResult(
-            success=False, reason=f"PIPELINE_ERROR: {str(e)}"
-            )
+        return PreprocessResult(success=False, reason=f"PIPELINE_ERROR: {str(e)}")
 
 
 def save_processed_image(
@@ -98,4 +127,3 @@ if __name__ == "__main__":
         print(
             f"Add '{test_path}' to your folder to test preprocessing independently."
         )
- 
