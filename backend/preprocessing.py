@@ -81,16 +81,17 @@ def preprocess_image(image_bytes: bytes) -> PreprocessResult:
         # 2. Upscale image to improve text resolution (DPI)
         upscaled = upscale_image(grey)
 
+        # 3. Sharpen image
         sharp = sharpen_image(upscaled)
 
-        # 3. Light noise reduction BEFORE contrast boost
+        # 4. Light noise reduction BEFORE contrast boost
         blurred = remove_noise(sharp)
 
-        # 4. Stretch lighting range & apply CLAHE
+        # 5. Stretch lighting range & apply CLAHE
         norm = normalize_contrast(blurred)
         contrasted = enhance_contrast(norm)
 
-        # 5. Fine-tuned adaptive binarisation with higher C
+        # 6. Fine-tuned adaptive binarisation with higher C
         thresh = apply_threshold(contrasted)
 
         return PreprocessResult(success=True, image=thresh)
