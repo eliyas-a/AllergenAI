@@ -4,11 +4,11 @@ import cv2
 import numpy as np
 
 ### CONSTANTS ###
-CLAHE_CLIP_LIMIT = 2.0
-CLAHE_TILE_GRID = (8, 8)
-ADAPTIVE_BLOCK_SIZE = 15  
-ADAPTIVE_C = 12
-UPSCALE_FACTOR = 1.5
+CLAHE_CLIP_LIMIT = 1.5
+CLAHE_TILE_GRID = (5, 5)
+ADAPTIVE_BLOCK_SIZE = 31  
+ADAPTIVE_C = 8
+UPSCALE_FACTOR = 2.5
 
 @dataclass
 class PreprocessResult:
@@ -108,7 +108,7 @@ def save_processed_image(
 
 if __name__ == "__main__":
     # Test script for preprocessing module
-    test_path = "test_image.jpg"
+    test_path = "processing_test_image.jpg"
     output_path = "processed_output.png"
 
     try:
