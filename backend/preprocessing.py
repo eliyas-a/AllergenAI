@@ -19,9 +19,13 @@ ADAPTIVE_C = 12
 
 MIN_COMPONENT_AREA = 12
 
-MIN_ROI_RATIO = 0.15
-MAX_ROI_RATIO = 0.90
-ROI_PADDING = 10
+MIN_ROI_RATIO = 0.05        # crop must cover at least 5% of the image, otherwise it is probably noise
+ROI_PADDING = 25
+MAX_LINE_RATIO = 0.20   # components wider or taller than this fraction of the image are borders, not text
+
+### FILES ###
+TEST_IMAGE = "test_image.jpg"   # change the test image HERE ONLY
+OUTPUT_IMAGE = "processed_output.png"
 
 
 @dataclass
@@ -36,54 +40,61 @@ def convert_to_greyscale(image: np.ndarray) -> np.ndarray:
     """Converts a BGR image into greyscale."""
     return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-
 def crop_to_label(grey_image: np.ndarray) -> tuple[np.ndarray, bool]:
-    """Detects and crops the largest suitable rectangular region."""
+    """Crops to the densest block of text, ignoring borders and outlines."""
 
     height, width = grey_image.shape[:2]
 
+    # Inverted threshold: dark text becomes white on a black background
     blurred = cv2.GaussianBlur(grey_image, (5, 5), 0)
-    edges = cv2.Canny(blurred, 50, 150)
-
-    edges = cv2.dilate(
-        edges,
-        np.ones((3, 3), np.uint8),
-        iterations=1
+    text_mask = cv2.adaptiveThreshold(
+        blurred,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        31,
+        15
     )
 
-    contours, _ = cv2.findContours(
-        edges,
-        cv2.RETR_LIST,
-        cv2.CHAIN_APPROX_SIMPLE
+    # Remove borders: letters are small, but outlines and panel edges
+    # are connected shapes that span a large part of the image
+    count, labels, stats, _ = cv2.connectedComponentsWithStats(
+        text_mask,
+        connectivity=8
+    )
+    too_wide = stats[:, cv2.CC_STAT_WIDTH] > MAX_LINE_RATIO * width
+    too_tall = stats[:, cv2.CC_STAT_HEIGHT] > MAX_LINE_RATIO * height
+    remove = too_wide | too_tall
+    remove[0] = False                     # label 0 is the background
+    text_mask[remove[labels]] = 0
+
+    # Merge letters into words and lines into a paragraph block.
+    # The kernel is taller than the gap between lines but narrower than
+    # the gap between the ingredients and the nutrition panel.
+    kernel_w = max(width // 60, 3)
+    kernel_h = max(width // 50, 3)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (kernel_w, kernel_h))
+    merged = cv2.dilate(text_mask, kernel, iterations=1)
+
+    count, _, stats, _ = cv2.connectedComponentsWithStats(
+        merged,
+        connectivity=8
     )
 
-    best_box = None
-    best_area = 0
-
-    for contour in contours:
-
-        perimeter = cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(
-            contour, 0.02 * perimeter, True
-        )
-
-        if len(approx) != 4:
-            continue
-
-        x, y, box_w, box_h = cv2.boundingRect(approx)
-
-        area = box_w * box_h
-        ratio = area / (width * height)
-
-        if MIN_ROI_RATIO <= ratio <= MAX_ROI_RATIO:
-            if area > best_area:
-                best_area = area
-                best_box = (x, y, box_w, box_h)
-
-    if best_box is None:
+    if count <= 1:
         return grey_image, False
 
-    x, y, box_w, box_h = best_box
+    # Largest blob by pixel count (label 0 is the background)
+    largest = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+
+    x = stats[largest, cv2.CC_STAT_LEFT]
+    y = stats[largest, cv2.CC_STAT_TOP]
+    box_w = stats[largest, cv2.CC_STAT_WIDTH]
+    box_h = stats[largest, cv2.CC_STAT_HEIGHT]
+
+    # If the box is tiny, it is probably not a real label
+    if box_w * box_h < MIN_ROI_RATIO * width * height:
+        return grey_image, False
 
     x0 = max(x - ROI_PADDING, 0)
     y0 = max(y - ROI_PADDING, 0)
@@ -91,7 +102,6 @@ def crop_to_label(grey_image: np.ndarray) -> tuple[np.ndarray, bool]:
     y1 = min(y + box_h + ROI_PADDING, height)
 
     return grey_image[y0:y1, x0:x1], True
-
 
 def resize_to_target(
     grey_image: np.ndarray,
@@ -177,7 +187,7 @@ def remove_specks(binary_image: np.ndarray) -> np.ndarray:
     return cv2.bitwise_not(cleaned)
 
 
-def preprocess_image(image_bytes: bytes) -> PreprocessResult:
+def preprocess_image(image_bytes: bytes, use_crop: bool = True) -> PreprocessResult:
 
     if not image_bytes:
         return PreprocessResult(
@@ -203,8 +213,11 @@ def preprocess_image(image_bytes: bytes) -> PreprocessResult:
         # 1. Convert to greyscale
         grey = convert_to_greyscale(image)
 
-        # 2. Detect and crop the region of interest
-        cropped, roi_found = crop_to_label(grey)
+        # 2. Detect and crop the region of interest (can be switched off)
+        if use_crop:
+            cropped, roi_found = crop_to_label(grey)
+        else:
+            cropped, roi_found = grey, False
 
         # 3. Resize to a consistent width
         resized = resize_to_target(cropped)
@@ -247,12 +260,9 @@ def save_processed_image(
 
 if __name__ == "__main__":
 
-    test_path = "processing_test_image.jpg"
-    output_path = "processed_output.png"
-
     try:
 
-        with open(test_path, "rb") as f:
+        with open(TEST_IMAGE, "rb") as f:
 
             result = preprocess_image(f.read())
 
@@ -262,10 +272,7 @@ if __name__ == "__main__":
 
                 print(f"ROI Found: {result.roi_found}")
 
-                saved = save_processed_image(
-                    result.image,
-                    output_path
-                )
+                saved = save_processed_image(result.image, OUTPUT_IMAGE)
 
                 print(f"Processed Image Saved: {saved}")
                 print(f"Processed Image Shape: {result.image.shape}")
@@ -275,8 +282,4 @@ if __name__ == "__main__":
 
     except FileNotFoundError:
 
-        print(
-            f"Add '{test_path}' to your folder "
-            "to test preprocessing independently."
-        )
-
+        print(f"Could not find {TEST_IMAGE}")
