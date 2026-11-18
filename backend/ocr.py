@@ -142,7 +142,7 @@ def run_ocr(image_bytes: bytes) -> OCRScanResult:
 
 if __name__ == "__main__":
     # Test script for OCR module
-    test_image_path = "test_image.jpg"
+    test_image_path = "processed_output.png"
 
     try:
         with open(test_image_path, "rb") as image_file:
