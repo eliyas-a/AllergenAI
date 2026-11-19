@@ -24,7 +24,7 @@ ROI_PADDING = 25
 MAX_LINE_RATIO = 0.20   # components wider or taller than this fraction of the image are borders, not text
 
 ### FILES ###
-TEST_IMAGE = "test_image.jpg"   # change the test image HERE ONLY
+TEST_IMAGE = "processing_test_image.jpg"   # change the test image HERE ONLY
 OUTPUT_IMAGE = "processed_output.png"
 
 
