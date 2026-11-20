@@ -7,7 +7,7 @@ import numpy as np
 import pytesseract
 
 # Import preprocessing pipeline
-from backend.old_files.preprocessing_old import preprocess_image, PreprocessResult
+from old_files.preprocessing_old import preprocess_image, PreprocessResult
 
 # Locate system executable path automatically
 tesseract_path = shutil.which("tesseract") or "/usr/bin/tesseract"
